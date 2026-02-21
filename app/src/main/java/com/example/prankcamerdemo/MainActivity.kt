@@ -1,6 +1,5 @@
 package com.example.prankcamerdemo
 
-import android.media.MediaPlayer
 import android.os.Bundle
 import android.os.CountDownTimer
 import androidx.appcompat.app.AlertDialog
@@ -42,8 +41,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun startSimulation() {
         statusText.text = "Симуляция запущена (без доступа к камере/микрофону)"
-        mediaPlayer = MediaPlayer.create(this, R.raw.alert_sound)
-        mediaPlayer?.start()
 
         timer = object : CountDownTimer(60000, 1000) {
             override fun onTick(millisUntilFinished: Long) {
@@ -58,15 +55,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopSimulation() {
         timer?.cancel()
-        mediaPlayer?.stop()
-        mediaPlayer?.release()
-        mediaPlayer = null
         statusText.text = "Симуляция остановлена пользователем"
     }
 
     override fun onDestroy() {
         super.onDestroy()
         timer?.cancel()
-        mediaPlayer?.release()
     }
 }
