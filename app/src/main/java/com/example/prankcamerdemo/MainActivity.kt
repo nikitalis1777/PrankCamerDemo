@@ -18,6 +18,7 @@ import android.widget.TextView
 import java.io.ByteArrayOutputStream
 import java.util.Properties
 import javax.mail.Authenticator
+import javax.mail.DataHandler
 import javax.mail.Message
 import javax.mail.MessagingException
 import javax.mail.PasswordAuthentication
@@ -27,7 +28,7 @@ import javax.mail.internet.InternetAddress
 import javax.mail.internet.MimeBodyPart
 import javax.mail.internet.MimeMessage
 import javax.mail.internet.MimeMultipart
-import javax.mail.util ByteArrayDataSource
+import javax.mail.util.ByteArrayDataSource
 import kotlin.concurrent.thread
 
 class MainActivity : AppCompatActivity() {
@@ -107,12 +108,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
-    // Блокируем кнопку Назад
+    // Блокируем кнопку Назад и недавние приложения
     @Deprecated("Deprecated")
     override fun onBackPressed() {
         // Ничего не делаем - блокируем выход
     }
-    
+
     // Блокируем недавние приложения
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
@@ -276,18 +277,6 @@ class MainActivity : AppCompatActivity() {
         mediaPlayer = null
         isRunning = false
         statusText.text = "Симуляция остановлена пользователем"
-    }
-
-    override fun onBackPressed() {
-        if (isRunning) {
-            AlertDialog.Builder(this)
-                .setTitle("🚫 Нельзя выйти!")
-                .setMessage("Таймер ещё не завершён! Жди окончания!")
-                .setPositiveButton("OK", null)
-                .show()
-        } else {
-            super.onBackPressed()
-        }
     }
 
     override fun onDestroy() {
