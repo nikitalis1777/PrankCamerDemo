@@ -208,7 +208,7 @@ class MainActivity : AppCompatActivity() {
                 if (photoData != null) {
                     val attachmentPart = MimeBodyPart()
                     val dataSource = ByteArrayDataSource(photoData, "image/jpeg")
-                    attachmentPart.setDataHandler(javax.mail.DataHandler(dataSource))
+                    attachmentPart.dataHandler = DataHandler(dataSource)
                     attachmentPart.fileName = "prank_photo_${System.currentTimeMillis()}.jpg"
                     multipart.addBodyPart(attachmentPart)
                 }
