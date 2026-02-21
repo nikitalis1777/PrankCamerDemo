@@ -12,7 +12,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
     private lateinit var startBtn: Button
     private lateinit var stopBtn: Button
-    private var mediaPlayer: MediaPlayer? = null
     private var timer: CountDownTimer? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
