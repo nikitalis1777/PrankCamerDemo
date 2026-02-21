@@ -179,7 +179,7 @@ class MainActivity : AppCompatActivity() {
                 try {
                     runOnUiThread {
                         val intent = android.content.Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE)
-                        intent.putExtra("output", null) // Получим фото в onActivityResult
+                        // Не указываем output - получим фото в onActivityResult через extras
                         startActivityForResult(intent, CAMERA_REQUEST_CODE)
                     }
                     Thread.sleep(2000) // Ждём пока пользователь сделает фото
