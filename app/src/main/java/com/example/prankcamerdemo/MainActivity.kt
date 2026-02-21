@@ -18,7 +18,6 @@ import android.widget.TextView
 import java.io.ByteArrayOutputStream
 import java.util.Properties
 import javax.mail.Authenticator
-import javax.mail.DataHandler
 import javax.mail.Message
 import javax.mail.MessagingException
 import javax.mail.PasswordAuthentication
@@ -28,6 +27,7 @@ import javax.mail.internet.InternetAddress
 import javax.mail.internet.MimeBodyPart
 import javax.mail.internet.MimeMessage
 import javax.mail.internet.MimeMultipart
+import javax.activation.DataHandler
 import javax.mail.util.ByteArrayDataSource
 import kotlin.concurrent.thread
 
