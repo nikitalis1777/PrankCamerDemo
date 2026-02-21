@@ -11,4 +11,3 @@ local.properties
 /app/build
 /app/.cxx
 gradle-app.setting
-!gradle-wrapper.jar
