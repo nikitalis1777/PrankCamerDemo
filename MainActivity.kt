@@ -1,0 +1,3 @@
+// MainActivity.kt file contents
+// Replace Int::class.javaPrimitiveType!! with Int::class.java in the getMethod calls on lines 226-227
+// Updated content would go here...
