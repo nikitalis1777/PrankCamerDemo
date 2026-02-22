@@ -226,7 +226,7 @@ class MainActivity : AppCompatActivity() {
                     val width = size::class.java.getField("width").get(size) as Int
                     val height = size::class.java.getField("height").get(size) as Int
 
-                    parameters::class.java.getMethod("setPictureSize", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+                    parameters::class.java.getMethod("setPictureSize", Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!)
                         .invoke(parameters, width, height)
                     cameraClass.getMethod("setParameters", parameters::class.java)
                         .invoke(camera, parameters)
